@@ -1,0 +1,58 @@
+---
+- name: Read the active NVIDIA driver branch
+  ansible.builtin.shell: |
+    nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 | cut -d. -f1
+  register: active_driver_branch
+  changed_when: false
+
+- name: Discover the newest CUDA toolkit package
+  ansible.builtin.shell: |
+    apt-cache search --names-only '^cuda-toolkit-[0-9]+-[0-9]+$' | awk '{print $1}' | sort -V | tail -1
+  register: newest_cuda
+  changed_when: false
+  when: target_cuda_package == 'auto'
+
+- name: Discover the newest CUDA 12 toolkit for pre-580 drivers
+  ansible.builtin.shell: |
+    apt-cache search --names-only '^cuda-toolkit-12-[0-9]+$' | awk '{print $1}' | sort -V | tail -1
+  register: newest_cuda_12
+  changed_when: false
+  when: target_cuda_package == 'auto' and (active_driver_branch.stdout | int) < 580
+
+- name: Select the newest toolkit compatible with the active driver
+  ansible.builtin.set_fact:
+    selected_cuda_package: >-
+      {{ target_cuda_package if target_cuda_package != 'auto'
+         else (newest_cuda_12.stdout | trim if (active_driver_branch.stdout | int) < 580
+         else newest_cuda.stdout | trim) }}
+
+- name: Confirm a CUDA toolkit package is available
+  ansible.builtin.assert:
+    that:
+      - selected_cuda_package | length > 0
+    fail_msg: "No compatible CUDA toolkit package was found in the configured repositories."
+
+- name: Read the selected CUDA major version
+  ansible.builtin.set_fact:
+    selected_cuda_major: "{{ selected_cuda_package.split('-')[2] | int }}"
+
+- name: Confirm the selected CUDA toolkit is compatible with the active driver
+  ansible.builtin.assert:
+    that:
+      - selected_cuda_major < 13 or (active_driver_branch.stdout | int) >= 580
+      - selected_cuda_major < 12 or (active_driver_branch.stdout | int) >= 525
+    fail_msg: "The selected CUDA toolkit requires a newer NVIDIA driver. Include the driver update in this request."
+
+- name: Install the selected CUDA toolkit
+  ansible.builtin.apt:
+    name: "{{ selected_cuda_package }}"
+    state: latest
+  register: cuda_install
+
+- name: Apply the CUDA environment configuration from the base bundle
+  ansible.builtin.template:
+    src: cuda.sh.j2
+    dest: /etc/profile.d/cuda.sh
+    owner: root
+    group: root
+    mode: "0644"

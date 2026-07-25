@@ -1,0 +1,65 @@
+---
+- name: Read visible NVIDIA GPUs
+  ansible.builtin.shell: "nvidia-smi -L 2>/dev/null || true"
+  register: gpu_list
+  changed_when: false
+
+- name: Confirm every NVIDIA GPU is visible when no reboot is pending
+  ansible.builtin.assert:
+    that:
+      - "'GPU ' in gpu_list.stdout"
+    fail_msg: The selected GPU software was installed, but the active NVIDIA driver could not see the GPU.
+  when: >-
+    (update_driver | bool or update_cuda | bool or install_container_toolkit | bool) and
+    not (autodriver_reboot_required | default(false) | bool)
+
+- name: Read the installed driver package
+  ansible.builtin.shell: "dpkg-query -W -f='${Status}' '{{ selected_driver_package }}' 2>/dev/null || true"
+  register: driver_package_status
+  changed_when: false
+  when: update_driver | bool
+
+- name: Confirm the selected driver package is installed
+  ansible.builtin.assert:
+    that:
+      - "'install ok installed' in driver_package_status.stdout"
+    fail_msg: The selected NVIDIA driver package could not be validated.
+  when: update_driver | bool
+
+- name: Read the active driver version
+  ansible.builtin.shell: "nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 || true"
+  register: driver_version
+  changed_when: false
+
+- name: Read the installed CUDA Toolkit version
+  ansible.builtin.shell: "nvcc --version 2>/dev/null | awk '/release/ {gsub(/,/,\"\",$6); print $6}' || true"
+  register: cuda_version
+  changed_when: false
+
+- name: Confirm CUDA was installed when selected
+  ansible.builtin.assert:
+    that:
+      - cuda_version.stdout | trim != ''
+    fail_msg: CUDA Toolkit was selected but nvcc could not be validated.
+  when: update_cuda | bool
+
+- name: Read NVIDIA Container Toolkit version
+  ansible.builtin.shell: "nvidia-ctk --version 2>/dev/null || true"
+  register: container_toolkit_version
+  changed_when: false
+
+- name: Confirm NVIDIA Container Toolkit was installed when selected
+  ansible.builtin.assert:
+    that:
+      - container_toolkit_version.stdout | trim != ''
+    fail_msg: NVIDIA Container Toolkit was selected but could not be validated.
+  when: install_container_toolkit | bool
+
+- name: Share the final configuration in the job log
+  ansible.builtin.debug:
+    msg:
+      gpus: "{{ gpu_list.stdout_lines | default([]) }}"
+      driver: "{{ driver_version.stdout | default('Not active') }}"
+      cuda_toolkit: "{{ cuda_version.stdout | default('Not installed') }}"
+      nvidia_container_toolkit: "{{ container_toolkit_version.stdout | default('Not installed') }}"
+      reboot_required: "{{ autodriver_reboot_required | default(false) | bool }}"

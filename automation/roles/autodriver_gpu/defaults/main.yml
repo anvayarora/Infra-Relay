@@ -1,0 +1,16 @@
+---
+skip_install_nvidia: false
+update_driver: false
+update_cuda: false
+install_container_toolkit: false
+manage_nouveau: false
+enable_iommu: false
+target_driver_package: auto
+target_cuda_package: auto
+cuda_keyring_url: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu{{ ansible_distribution_version | replace('.', '') }}/x86_64/cuda-keyring_1.1-1_all.deb"
+cuda_keyring_deb: "/tmp/cuda-keyring_1.1-1_all.deb"
+container_toolkit_keyring: "/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg"
+container_toolkit_list: "/etc/apt/sources.list.d/nvidia-container-toolkit.list"
+
+allow_reboot: false
+autodriver_reboot_required: false

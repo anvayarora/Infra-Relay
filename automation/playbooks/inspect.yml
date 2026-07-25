@@ -1,0 +1,140 @@
+---
+- name: Read the VM configuration
+  hosts: target
+  gather_facts: true
+  become: false
+  tasks:
+    - name: Read NVIDIA hardware
+      ansible.builtin.shell: "lspci | grep -i nvidia || true"
+      register: gpu_hardware
+      changed_when: false
+
+    - name: Read GPU names
+      ansible.builtin.shell: "nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | sort | uniq -c | sed 's/^ *//' || true"
+      register: gpu_names
+      changed_when: false
+
+    - name: Read the installed driver
+      ansible.builtin.shell: "nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 || true"
+      register: driver_version
+      changed_when: false
+
+    - name: Read the recommended driver package
+      ansible.builtin.shell: |
+        if command -v ubuntu-drivers >/dev/null 2>&1; then
+          ubuntu-drivers devices 2>/dev/null | awk '/recommended/ {for(i=1;i<=NF;i++) if($i ~ /^nvidia-driver-[0-9]+/) {print $i; exit}}'
+        fi
+      register: recommended_driver
+      changed_when: false
+
+    - name: Read the newest driver package in the current package list
+      ansible.builtin.shell: "apt-cache search --names-only '^nvidia-driver-[0-9]+$' 2>/dev/null | awk '{print $1}' | sort -V | tail -1"
+      register: newest_driver
+      changed_when: false
+
+    - name: Read the installed CUDA toolkit
+      ansible.builtin.shell: |
+        if command -v nvcc >/dev/null 2>&1; then
+          nvcc --version | awk '/release/ {gsub(/,/,"",$6); print $6}'
+        elif [ -f /usr/local/cuda/version.json ]; then
+          python3 -c "import json; print(json.load(open('/usr/local/cuda/version.json')).get('cuda',{}).get('version',''))" 2>/dev/null || true
+        fi
+      register: cuda_version
+      changed_when: false
+
+    - name: Read the newest CUDA toolkit in the current package list
+      ansible.builtin.shell: "apt-cache search --names-only '^cuda-toolkit-[0-9]+-[0-9]+$' 2>/dev/null | awk '{print $1}' | sort -V | tail -1"
+      register: recommended_cuda
+      changed_when: false
+
+    - name: Read active GPU work
+      ansible.builtin.shell: "nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader 2>/dev/null || true"
+      register: active_gpu_processes
+      changed_when: false
+
+    - name: Read Secure Boot status
+      ansible.builtin.shell: "mokutil --sb-state 2>/dev/null || echo 'Unavailable'"
+      register: secure_boot
+      changed_when: false
+
+    - name: Read the active GPU kernel driver
+      ansible.builtin.shell: |
+        set -o pipefail
+        details="$(lspci -k -d 10de: 2>/dev/null || true)"
+        if printf '%s\n' "$details" | grep -q 'Kernel driver in use: nouveau'; then
+          echo 'Nouveau bound to GPU'
+        elif printf '%s\n' "$details" | grep -q 'Kernel driver in use: nvidia'; then
+          echo 'NVIDIA driver bound to GPU'
+        elif lsmod | grep -q '^nouveau'; then
+          echo 'Nouveau module loaded'
+        elif [ -f /etc/modprobe.d/blacklist-nouveau.conf ]; then
+          echo 'Disabled'
+        else
+          echo 'Not configured'
+        fi
+      args:
+        executable: /bin/bash
+      register: nouveau_status
+      changed_when: false
+
+    - name: Read IOMMU status
+      ansible.builtin.shell: "if grep -Eq 'intel_iommu=on|amd_iommu=on' /proc/cmdline; then echo 'Enabled'; else echo 'Not enabled'; fi"
+      register: iommu_status
+      changed_when: false
+
+    - name: Check internet access to the official software source
+      ansible.builtin.shell: "curl -fsSI --max-time 10 https://developer.download.nvidia.com >/dev/null && echo yes || echo no"
+      register: internet_check
+      changed_when: false
+
+    - name: Read free disk space
+      ansible.builtin.shell: "df -h / | awk 'NR==2 {print $4}'"
+      register: free_disk
+      changed_when: false
+
+    - name: Read container runtime
+      ansible.builtin.shell: |
+        if command -v docker >/dev/null 2>&1; then docker --version;
+        elif command -v containerd >/dev/null 2>&1; then containerd --version;
+        else echo 'Not installed'; fi
+      register: container_runtime
+      changed_when: false
+
+    - name: Read NVIDIA container support
+      ansible.builtin.shell: "nvidia-ctk --version 2>/dev/null || echo 'Not installed'"
+      register: container_toolkit
+      changed_when: false
+
+    - name: Build the customer-facing VM snapshot
+      ansible.builtin.set_fact:
+        inspection_payload:
+          hostname: "{{ ansible_hostname }}"
+          os_name: "{{ ansible_distribution }}"
+          os_version: "{{ ansible_distribution_version }}"
+          architecture: "{{ ansible_architecture }}"
+          kernel: "{{ ansible_kernel }}"
+          gpu_summary: "{{ gpu_names.stdout | trim if gpu_names.stdout | trim != '' else gpu_hardware.stdout | trim }}"
+          gpu_present: "{{ gpu_hardware.stdout | trim != '' }}"
+          driver_version: "{{ driver_version.stdout | trim }}"
+          recommended_driver: "{{ recommended_driver.stdout | trim if recommended_driver.stdout | trim != '' else newest_driver.stdout | trim }}"
+          cuda_version: "{{ cuda_version.stdout | trim }}"
+          recommended_cuda: "{{ recommended_cuda.stdout | trim }}"
+          active_gpu_processes: "{{ active_gpu_processes.stdout | trim }}"
+          secure_boot: "{{ secure_boot.stdout | trim }}"
+          nouveau_status: "{{ nouveau_status.stdout | trim }}"
+          iommu_status: "{{ iommu_status.stdout | trim }}"
+          internet_available: "{{ internet_check.stdout | trim == 'yes' }}"
+          free_disk: "{{ free_disk.stdout | trim }}"
+          container_runtime: "{{ container_runtime.stdout | trim }}"
+          container_toolkit: "{{ container_toolkit.stdout | trim }}"
+          reboot_pending: "{{ ansible_facts['date_time'] is defined and false }}"
+          status: >-
+            {{ 'unsupported' if gpu_hardware.stdout | trim == ''
+               else 'action_available' if (driver_version.stdout | trim == '' or cuda_version.stdout | trim == '')
+               else 'healthy' }}
+
+    - name: Publish the snapshot to the runner result
+      ansible.builtin.set_stats:
+        data:
+          inspection_payload: "{{ inspection_payload }}"
+        per_host: false

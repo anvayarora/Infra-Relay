@@ -1,0 +1,53 @@
+---
+- name: Discover the recommended NVIDIA driver package
+  ansible.builtin.shell: |
+    set -o pipefail
+    ubuntu-drivers devices 2>/dev/null | awk '/recommended/ {for(i=1;i<=NF;i++) if($i ~ /^nvidia-driver-[0-9]+/) {print $i; exit}}'
+  args:
+    executable: /bin/bash
+  register: recommended_driver
+  changed_when: false
+  when: target_driver_package == 'auto'
+
+- name: Use the newest available driver package when no recommendation is returned
+  ansible.builtin.shell: |
+    apt-cache search --names-only '^nvidia-driver-[0-9]+$' | awk '{print $1}' | sort -V | tail -1
+  register: newest_driver
+  changed_when: false
+  when: target_driver_package == 'auto' and (recommended_driver.stdout | default('') | trim == '')
+
+- name: Select the driver package
+  ansible.builtin.set_fact:
+    selected_driver_package: >-
+      {{ target_driver_package if target_driver_package != 'auto'
+         else (recommended_driver.stdout | trim if recommended_driver.stdout | default('') | trim != ''
+         else newest_driver.stdout | trim) }}
+
+- name: Confirm a driver package is available
+  ansible.builtin.assert:
+    that:
+      - selected_driver_package | length > 0
+    fail_msg: No supported NVIDIA driver package was found in the configured repositories.
+
+- name: Install the selected NVIDIA driver
+  ansible.builtin.apt:
+    name: "{{ selected_driver_package }}"
+    state: latest
+  register: driver_install
+
+- name: Record a pending reboot when reboot is not permitted
+  ansible.builtin.set_fact:
+    autodriver_reboot_required: true
+  when: driver_install.changed and not (allow_reboot | bool)
+
+- name: Restart the VM after a driver change
+  ansible.builtin.reboot:
+    reboot_timeout: 900
+    test_command: uptime
+  when: driver_install.changed and (allow_reboot | bool)
+
+- name: Confirm the active driver can see the GPU
+  ansible.builtin.command: nvidia-smi -L
+  register: driver_check
+  changed_when: false
+  when: not driver_install.changed or (allow_reboot | bool)

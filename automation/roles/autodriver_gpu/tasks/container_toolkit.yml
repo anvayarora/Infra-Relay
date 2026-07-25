@@ -1,0 +1,60 @@
+---
+- name: Confirm a supported container runtime is present
+  ansible.builtin.shell: |
+    if command -v docker >/dev/null 2>&1; then echo docker;
+    elif command -v containerd >/dev/null 2>&1; then echo containerd;
+    else exit 1; fi
+  register: detected_container_runtime
+  changed_when: false
+  failed_when: detected_container_runtime.rc != 0
+
+- name: Download the NVIDIA Container Toolkit signing key
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor --yes -o {{ container_toolkit_keyring }}
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Configure the NVIDIA Container Toolkit repository
+  ansible.builtin.shell: |
+    set -o pipefail
+    curl -fsSL https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+      | sed 's#deb https://#deb [signed-by={{ container_toolkit_keyring }}] https://#g' \
+      > {{ container_toolkit_list }}
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Refresh available container packages
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install NVIDIA Container Toolkit
+  ansible.builtin.apt:
+    name: nvidia-container-toolkit
+    state: latest
+
+- name: Configure Docker for NVIDIA GPUs
+  ansible.builtin.command: nvidia-ctk runtime configure --runtime=docker
+  register: nvidia_docker_config
+  changed_when: "'Wrote updated config' in nvidia_docker_config.stdout or 'Wrote updated config' in nvidia_docker_config.stderr"
+  when: detected_container_runtime.stdout | trim == 'docker'
+
+- name: Restart Docker after runtime configuration
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted
+  when: detected_container_runtime.stdout | trim == 'docker'
+
+- name: Configure containerd for NVIDIA GPUs
+  ansible.builtin.command: nvidia-ctk runtime configure --runtime=containerd
+  register: nvidia_containerd_config
+  changed_when: "'Wrote updated config' in nvidia_containerd_config.stdout or 'Wrote updated config' in nvidia_containerd_config.stderr"
+  when: detected_container_runtime.stdout | trim == 'containerd'
+
+- name: Restart containerd after runtime configuration
+  ansible.builtin.systemd:
+    name: containerd
+    state: restarted
+  when: detected_container_runtime.stdout | trim == 'containerd'

@@ -1,0 +1,87 @@
+---
+- name: Install build and discovery packages
+  ansible.builtin.apt:
+    name:
+      - build-essential
+      - gcc
+      - dkms
+      - "linux-headers-{{ ansible_kernel }}"
+      - ubuntu-drivers-common
+      - pciutils
+      - curl
+      - ca-certificates
+      - gnupg
+    state: present
+    update_cache: true
+
+- name: Apply the Nouveau block
+  ansible.builtin.template:
+    src: blacklist-nouveau.conf.j2
+    dest: /etc/modprobe.d/blacklist-nouveau.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: nouveau_config
+  when: manage_nouveau | bool
+
+- name: Rebuild the boot image when the Nouveau setting changes
+  ansible.builtin.command: update-initramfs -u
+  when: manage_nouveau | bool and nouveau_config.changed
+
+- name: Choose the IOMMU setting for Intel systems
+  ansible.builtin.set_fact:
+    autodriver_iommu_token: intel_iommu=on
+  when: enable_iommu | bool and ('Intel' in (ansible_processor | join(' ')))
+
+- name: Choose the IOMMU setting for AMD systems
+  ansible.builtin.set_fact:
+    autodriver_iommu_token: amd_iommu=on
+  when: enable_iommu | bool and ('AMD' in (ansible_processor | join(' ')))
+
+- name: Add IOMMU settings without replacing existing options
+  ansible.builtin.shell: |
+    python3 - <<'PY'
+    from pathlib import Path
+    path = Path('/etc/default/grub')
+    lines = path.read_text().splitlines()
+    wanted = "{{ autodriver_iommu_token | default('') }} iommu=pt pci=realloc".split()
+    output = []
+    changed = False
+    for line in lines:
+        if line.startswith('GRUB_CMDLINE_LINUX='):
+            value = line.split('=', 1)[1].strip().strip('"')
+            parts = value.split()
+            for token in wanted:
+                if token and token not in parts:
+                    parts.append(token)
+                    changed = True
+            line = 'GRUB_CMDLINE_LINUX="' + ' '.join(parts) + '"'
+        output.append(line)
+    if changed:
+        path.write_text('\n'.join(output) + '\n')
+        print('changed')
+    PY
+  register: grub_update
+  changed_when: "'changed' in grub_update.stdout"
+  when: enable_iommu | bool and autodriver_iommu_token is defined
+
+- name: Regenerate GRUB after a managed setting changes
+  ansible.builtin.command: update-grub
+  when: grub_update is defined and grub_update.changed
+
+- name: Record a pending reboot for boot configuration changes
+  ansible.builtin.set_fact:
+    autodriver_reboot_required: true
+  when: >-
+    not (allow_reboot | bool) and
+    ((manage_nouveau | bool and nouveau_config is defined and nouveau_config.changed) or
+     (grub_update is defined and grub_update.changed))
+
+- name: Restart the VM after boot configuration changes
+  ansible.builtin.reboot:
+    reboot_timeout: 900
+    test_command: uptime
+  when: >-
+    (allow_reboot | bool) and
+    ((manage_nouveau | bool and nouveau_config is defined and nouveau_config.changed) or
+     (grub_update is defined and grub_update.changed))

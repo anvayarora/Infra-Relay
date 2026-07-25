@@ -1,0 +1,10 @@
+---
+- name: AutoDriver repositories
+  hosts: target
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Run repositories stage
+      ansible.builtin.include_role:
+        name: autodriver_gpu
+        tasks_from: repositories.yml

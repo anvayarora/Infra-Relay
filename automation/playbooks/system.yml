@@ -1,0 +1,10 @@
+---
+- name: AutoDriver system
+  hosts: target
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Run system stage
+      ansible.builtin.include_role:
+        name: autodriver_gpu
+        tasks_from: system.yml

@@ -1,0 +1,14 @@
+---
+- name: Download the NVIDIA CUDA repository keyring
+  ansible.builtin.get_url:
+    url: "{{ cuda_keyring_url }}"
+    dest: "{{ cuda_keyring_deb }}"
+    mode: "0644"
+
+- name: Install the NVIDIA CUDA repository keyring
+  ansible.builtin.apt:
+    deb: "{{ cuda_keyring_deb }}"
+
+- name: Refresh available packages
+  ansible.builtin.apt:
+    update_cache: true

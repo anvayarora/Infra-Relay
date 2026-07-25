@@ -1,0 +1,10 @@
+---
+- name: AutoDriver validate
+  hosts: target
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Run validate stage
+      ansible.builtin.include_role:
+        name: autodriver_gpu
+        tasks_from: validate.yml

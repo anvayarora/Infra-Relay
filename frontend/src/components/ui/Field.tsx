@@ -1,0 +1,1 @@
+export function Field({label,description,children}:{label:string;description?:string;children:React.ReactNode}){return <div><div className="mb-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400">{label}</div>{children}{description&&<div className="mt-1.5 text-[10px] leading-4 text-zinc-500">{description}</div>}</div>}

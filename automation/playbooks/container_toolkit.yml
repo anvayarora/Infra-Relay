@@ -1,0 +1,10 @@
+---
+- name: AutoDriver container toolkit
+  hosts: target
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Run container toolkit stage
+      ansible.builtin.include_role:
+        name: autodriver_gpu
+        tasks_from: container_toolkit.yml

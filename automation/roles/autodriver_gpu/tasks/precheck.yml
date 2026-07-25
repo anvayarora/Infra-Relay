@@ -1,0 +1,56 @@
+---
+- name: Confirm the operating system is supported
+  ansible.builtin.assert:
+    that:
+      - ansible_distribution == "Ubuntu"
+      - ansible_distribution_version in ["22.04", "24.04"]
+    fail_msg: "AutoDriver currently supports Ubuntu 22.04 and 24.04."
+
+- name: Detect NVIDIA hardware
+  ansible.builtin.shell: "set -o pipefail && lspci | grep -i nvidia"
+  args:
+    executable: /bin/bash
+  register: nvidia_hardware
+  changed_when: false
+  failed_when: nvidia_hardware.rc != 0
+
+- name: Check for active GPU work
+  ansible.builtin.shell: "nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader 2>/dev/null || true"
+  args:
+    executable: /bin/bash
+  register: active_gpu_work
+  changed_when: false
+
+- name: Stop before interrupting active GPU work
+  ansible.builtin.assert:
+    that:
+      - active_gpu_work.stdout | trim == ""
+    fail_msg: "Active GPU work was found. Stop it before changing the driver, boot settings, or container runtime."
+  when: update_driver | bool or manage_nouveau | bool or enable_iommu | bool or install_container_toolkit | bool
+
+- name: Confirm enough free space is available
+  ansible.builtin.shell: "df -Pk / | awk 'NR==2 {print $4}'"
+  register: root_free_kb
+  changed_when: false
+
+- name: Require at least 8 GB of free space
+  ansible.builtin.assert:
+    that:
+      - root_free_kb.stdout | int > 8388608
+    fail_msg: "At least 8 GB of free space is required."
+
+- name: Confirm the official NVIDIA source is reachable
+  ansible.builtin.uri:
+    url: https://developer.download.nvidia.com
+    method: HEAD
+    status_code: [200, 301, 302, 403]
+    timeout: 15
+  when: update_driver | bool or update_cuda | bool
+
+- name: Confirm the NVIDIA container source is reachable
+  ansible.builtin.uri:
+    url: https://nvidia.github.io/libnvidia-container/gpgkey
+    method: GET
+    status_code: [200]
+    timeout: 15
+  when: install_container_toolkit | bool

@@ -1,0 +1,16 @@
+---
+- name: Apply selected AutoDriver components
+  hosts: target
+  gather_facts: true
+  become: true
+  roles:
+    - role: autodriver_gpu
+      vars:
+        update_driver: "{{ driver | default('none') not in ['none', '', false] }}"
+        update_cuda: "{{ cuda | default('none') not in ['none', '', false] }}"
+        install_container_toolkit: "{{ container_toolkit | default(false) | bool }}"
+        manage_nouveau: "{{ resolve_nouveau | default(false) | bool }}"
+        enable_iommu: "{{ enable_iommu | default(false) | bool }}"
+        allow_reboot: "{{ allow_reboot | default(false) | bool }}"
+        target_driver_package: "{{ 'auto' if driver | default('latest_compatible') in ['latest_compatible', 'auto'] else driver }}"
+        target_cuda_package: "{{ 'auto' if cuda | default('latest_compatible') in ['latest_compatible', 'auto'] else cuda }}"

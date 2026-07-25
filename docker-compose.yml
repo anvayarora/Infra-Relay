@@ -1,0 +1,47 @@
+name: infrarelay
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: infrarelay
+      POSTGRES_USER: infrarelay
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-infrarelay_local}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infrarelay -d infrarelay"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://infrarelay:${POSTGRES_PASSWORD:-infrarelay_local}@postgres:5432/infrarelay
+      CORS_ORIGINS: http://localhost:4000
+      PUBLIC_URL: http://localhost:4000
+      AUTODRIVER_AUTOMATION_DIR: /automation
+    ports:
+      - "9000:9000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./automation:/automation:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  frontend:
+    build: ./frontend
+    ports:
+      - "4000:4000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+volumes:
+  postgres_data:

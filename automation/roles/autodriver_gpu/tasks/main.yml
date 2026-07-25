@@ -1,0 +1,26 @@
+---
+- name: Run AutoDriver prechecks
+  ansible.builtin.include_tasks: precheck.yml
+
+- name: Prepare operating system and boot settings
+  ansible.builtin.include_tasks: system.yml
+  when: update_driver | bool or update_cuda | bool or install_container_toolkit | bool or manage_nouveau | bool or enable_iommu | bool
+
+- name: Configure NVIDIA repositories
+  ansible.builtin.include_tasks: repositories.yml
+  when: update_driver | bool or update_cuda | bool
+
+- name: Install or update the NVIDIA driver
+  ansible.builtin.include_tasks: driver.yml
+  when: update_driver | bool
+
+- name: Install or update the CUDA Toolkit
+  ansible.builtin.include_tasks: cuda.yml
+  when: update_cuda | bool
+
+- name: Install or update NVIDIA Container Toolkit
+  ansible.builtin.include_tasks: container_toolkit.yml
+  when: install_container_toolkit | bool
+
+- name: Validate selected components
+  ansible.builtin.include_tasks: validate.yml
