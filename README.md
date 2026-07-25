@@ -94,7 +94,7 @@ It can represent:
 
 An Environment can be attached to a custom frontend, internal portal, command-line client or AI agent without changing the underlying automation.
 
-![InfraRelay environments](docs/screenshots/environment.png)
+![InfraRelay environments](docs/screenshots/environments.png)
 
 ### Resources
 
