@@ -313,19 +313,6 @@ The platform provides a practical path from scripts and tickets to controlled in
 
 ---
 
-## Screenshot files
-
-Place the following light-mode screenshots in `docs/screenshots/`:
-
-```text
-dashboard.png
-workflow.png
-environment.png
-resources.png
-```
-
----
-
 ## Source note
 
 The enterprise adoption statement above is based on Microsoft technical literature that cited Active Directory usage across 95% of enterprises. Microsoft’s current Entra ID product page separately reports adoption by more than 720,000 organisations.
